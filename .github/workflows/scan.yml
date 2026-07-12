@@ -19,6 +19,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -28,13 +38,18 @@ jobs:
             "subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID || vars.ARM_SUBSCRIPTION_ID }}",
             "tenantId":"${{ secrets.ARM_TENANT_ID || vars.ARM_TENANT_ID }}"}
 
-      - name: Show Azure Account
-        run: az account show
-
-      - name: Show Selected Resource Group
+      - name: Run dry-run scan
         run: |
-          echo "Resource group: ${{ inputs.resource_group }}"
+          python -m src.cleaner --resource-group "${{ inputs.resource_group }}" --subscription-id "${{ secrets.ARM_SUBSCRIPTION_ID || vars.ARM_SUBSCRIPTION_ID }}"
 
-      - name: List Resources in Resource Group
+      - name: Write job summary
         run: |
-          az resource list --resource-group "${{ inputs.resource_group }}" --output table
+          echo "Azure Resource Cleaner finished in dry-run mode for resource group: ${{ inputs.resource_group }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Reports are stored in the reports/ directory and uploaded as an artifact." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: azure-resource-cleaner-report
+          path: reports/*
+          if-no-files-found: error
