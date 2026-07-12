@@ -2,16 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-
-from azure.identity import AzureCliCredential
-from azure.mgmt.resource import ResourceManagementClient
-
-
-def _resource_group_from_id(resource_id: str | None) -> str | None:
-	if not resource_id or "/resourceGroups/" not in resource_id:
-		return None
-	suffix = resource_id.split("/resourceGroups/", 1)[1]
-	return suffix.split("/", 1)[0]
+import json
+import subprocess
 
 
 @dataclass(slots=True)
@@ -42,27 +34,45 @@ class ResourceRecord:
 		}
 
 
+def _resource_group_from_id(resource_id: str | None) -> str | None:
+	if not resource_id or "/resourceGroups/" not in resource_id:
+		return None
+	suffix = resource_id.split("/resourceGroups/", 1)[1]
+	return suffix.split("/", 1)[0]
+
+
 def list_resources(subscription_id: str, resource_group: str) -> list[ResourceRecord]:
-	credential = AzureCliCredential()
-	client = ResourceManagementClient(credential, subscription_id)
+	command = [
+		"az",
+		"resource",
+		"list",
+		"--subscription",
+		subscription_id,
+		"--resource-group",
+		resource_group,
+		"--output",
+		"json",
+	]
+	completed = subprocess.run(command, check=True, capture_output=True, text=True)
+	items = json.loads(completed.stdout or "[]")
 
 	records: list[ResourceRecord] = []
-	for resource in client.resources.list_by_resource_group(resource_group):
+	for item in items:
 		records.append(
 			ResourceRecord(
-				id=resource.id,
-				name=resource.name,
-				type=resource.type,
-				location=getattr(resource, "location", None),
-				resource_group=_resource_group_from_id(resource.id),
-				api_version=getattr(resource, "api_version", None),
-				tags={str(key): str(value) for key, value in dict(getattr(resource, "tags", {}) or {}).items()},
-				managed_by=getattr(resource, "managed_by", None),
-				kind=getattr(resource, "kind", None),
+				id=item.get("id", ""),
+				name=item.get("name", ""),
+				type=item.get("type", ""),
+				location=item.get("location"),
+				resource_group=item.get("resourceGroup") or _resource_group_from_id(item.get("id")),
+				api_version=item.get("apiVersion"),
+				tags={str(key): str(value) for key, value in dict(item.get("tags") or {}).items()},
+				managed_by=item.get("managedBy"),
+				kind=item.get("kind"),
 				extra={
-					"identity": getattr(resource, "identity", None),
-					"sku": getattr(resource, "sku", None),
-					"plan": getattr(resource, "plan", None),
+					"identity": item.get("identity"),
+					"sku": item.get("sku"),
+					"plan": item.get("plan"),
 				},
 			)
 		)
